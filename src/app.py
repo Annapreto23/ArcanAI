@@ -6,12 +6,59 @@ Workflow :
 3. Obtenir la signification des positions et l'interprétation AI
 """
 
+
 import streamlit as st
 from typing import List
-from llm_utils import LLMHandler, ReadingResponse
+from llm_utils import LLMHandler
 
 # ---------------------------
-# Tarot deck
+# Configuration
+# ---------------------------
+st.set_page_config(page_title="ArcanAI — Les Arcanes Parlent", layout="wide")
+
+# Style mystique
+st.markdown("""
+<style>
+body {
+    background-color: #0b0b0d;
+    color: #e6d5b8;
+    font-family: 'Georgia', serif;
+}
+h1, h2, h3 {
+    color: #d4af37;
+    text-align: center;
+    text-shadow: 0px 0px 8px #d4af37;
+}
+.card-icon {
+    width: 50px;
+    height: 80px;
+    border: 1px solid #d4af37;
+    border-radius: 6px;
+    background: rgba(212,175,55,0.08);
+    display: inline-block;
+    margin: 3px;
+    box-shadow: 0 0 8px rgba(212,175,55,0.3);
+}
+.card-icon:hover {
+    background: rgba(212,175,55,0.2);
+    cursor: pointer;
+}
+div[data-testid="stButton"] > button {
+    background-color: #1f1f23;
+    color: #d4af37;
+    border-radius: 10px;
+    border: 1px solid #d4af37;
+    transition: all 0.2s ease;
+}
+div[data-testid="stButton"] > button:hover {
+    background-color: #d4af37;
+    color: #1f1f23;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------
+# Jeu de tarot
 # ---------------------------
 TAROT_DECK = [
     "Le Fou", "Le Magicien", "La Papesse", "L'Impératrice", "L'Empereur",
@@ -31,95 +78,100 @@ for suit in SUITS:
 # ---------------------------
 SPREADS = {
     "Une carte": ["Unique"],
-    "Trois cartes (Passé/Présent/Futur)": ["Passé", "Présent", "Futur"],
-    "Trois cartes (Esprit/Corps/Âme)": ["Esprit", "Corps", "Âme"],
+    "Trois cartes (Passé / Présent / Futur)": ["Passé", "Présent", "Futur"],
     "Croix simple": ["Signifiant", "Obstacle", "Racines", "Passé récent", "Objectif", "Futur proche"],
-    "Croix celtique": ["Signifiant", "Obstacle", "Fondation", "Passé", "But conscient", "Futur proche", "Image de soi", "Environnement", "Espoirs/Peurs", "Issue"]
 }
 
 # ---------------------------
 # Prompts
 # ---------------------------
-
 def prompt_position_meanings(question: str, spread_name: str, positions: List[str]) -> str:
     pos_list = "\n".join([f"- {i+1}. {pos}" for i, pos in enumerate(positions)])
-    return f"Définis le sens de chaque position pour la question : '{question}' et le tirage : '{spread_name}'. Positions:\n{pos_list}"
-
+    return f"Pour la question : '{question}', décris ce que symbolise chaque position du tirage '{spread_name}'.\n{pos_list}"
 
 def prompt_interpretation(question: str, spread_name: str, positions: List[str], cards: List[str]) -> str:
     paired = "\n".join([f"{pos}: {card}" for pos, card in zip(positions, cards)])
-    return f"Interprète chaque carte dans le contexte de la question '{question}' et du tirage '{spread_name}'. Cartes:\n{paired}" 
+    return f"Pour la question '{question}', révèle le message que portent ces cartes dans le tirage, en expliquant d'abord ce que signifie la carte de manière générale, avant d'expliquer son lien avec la question '{spread_name}'.\n{paired}"
 
 # ---------------------------
-# UI Streamlit
+# Interface principale
 # ---------------------------
-st.title("ArcanAI — Lecteur de Tarot AI")
-st.markdown("Sélectionnez les cartes tirées physiquement et obtenez l'interprétation AI.")
+st.title("✨ ArcanAI ✨")
+st.markdown("#### *Laisse parler les Arcanes...*")
 
-with st.sidebar:
-    spread_name = st.selectbox("Choisissez un tirage:", list(SPREADS.keys()))
+st.markdown("### Choisis la disposition du tirage :")
 
-question = st.text_input("Votre question:", value="Sur quoi devrais-je me concentrer ce mois-ci ?")
+cols = st.columns(len(SPREADS))
+for i, (spread_name, positions) in enumerate(SPREADS.items()):
+    with cols[i]:
+        st.markdown(f"#### {spread_name}")
+        if spread_name == "Une carte":
+            st.markdown("<div class='card-icon'></div>", unsafe_allow_html=True)
+        elif "Trois cartes" in spread_name:
+            st.markdown("<div>" + " ".join(["<div class='card-icon'></div>" for _ in range(3)]) + "</div>", unsafe_allow_html=True)
+        elif "Croix" in spread_name:
+            st.markdown("""
+                <div style='display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; justify-items:center;'>
+                    <div></div><div class='card-icon'></div><div></div>
+                    <div class='card-icon'></div><div class='card-icon'></div><div class='card-icon'></div>
+                    <div></div><div class='card-icon'></div><div></div>
+                </div>
+            """, unsafe_allow_html=True)
+        if st.button("Choisir", key=f"spread_{i}"):
+            st.session_state.selected_spread = spread_name
 
-llm = LLMHandler()
+if "selected_spread" not in st.session_state:
+    st.stop()
+
+spread_name = st.session_state.selected_spread
+positions = SPREADS[spread_name]
+
+st.markdown(f"### Tirage sélectionné : **{spread_name}**")
+
+question = st.text_input("Formule ta question :", value="Sur quoi devrais-je concentrer mon énergie ce mois-ci ?")
 
 # ---------------------------
-# Session state
+# Sélection manuelle des cartes
 # ---------------------------
-if "cards" not in st.session_state:
-    st.session_state.cards = [None]*len(SPREADS[spread_name])
-if "positions_meaning" not in st.session_state:
-    st.session_state.positions_meaning = None
-if "reading" not in st.session_state:
-    st.session_state.reading = None
-
-# ---------------------------
-# Sélection des cartes
-# ---------------------------
-st.subheader("Sélection des cartes tirées")
+st.markdown("### Sélectionne les cartes révélées :")
 selected_cards = []
-for i, pos in enumerate(SPREADS[spread_name]):
-    card = st.selectbox(f"{pos}:", TAROT_DECK, key=f"card_{i}")
-    selected_cards.append(card)
+cols = st.columns(len(positions))
+for i, (pos, col) in enumerate(zip(positions, cols)):
+    with col:
+        st.markdown(f"**{pos}**")
+        card = st.selectbox("", TAROT_DECK, key=f"card_{i}")
+        selected_cards.append(card)
+
 st.session_state.cards = selected_cards
 
 # ---------------------------
-# Signification des positions
+# Invocation de l'Oracle
 # ---------------------------
-if st.button("Obtenir les significations des positions"):
-    with st.spinner("Consultation AI pour les positions..."):
+llm = LLMHandler()
+
+if st.button("Révéler la signification des positions"):
+    with st.spinner("Les arcanes murmurent..."):
         messages_pos = [
-            {"role": "system", "content": "Vous êtes un interprète de tarot clair et bienveillant."},
-            {"role": "user", "content": prompt_position_meanings(question, spread_name, SPREADS[spread_name])}
+            {"role": "system", "content": "Tu es l'oracle qui révèle le sens profond de chaque position du tirage."},
+            {"role": "user", "content": prompt_position_meanings(question, spread_name, positions)}
         ]
-        try:
-            st.session_state.positions_meaning = llm.query_llm(messages_pos)
-        except Exception as e:
-            st.error(f"Erreur lors de l'appel au LLM: {e}")
+        st.session_state.positions_meaning = llm.query_llm(messages_pos)
 
-if st.session_state.positions_meaning:
-    st.subheader("Signification des positions")
+if "positions_meaning" in st.session_state and st.session_state.positions_meaning:
+    st.markdown("### ✴ Signification des positions ✴")
     for pm in st.session_state.positions_meaning.positions_meaning:
-        st.markdown(f"**{pm.position}**: {pm.meaning}")
+        st.markdown(f"**{pm.position}** — {pm.meaning}")
 
-# ---------------------------
-# Interprétation des cartes
-# ---------------------------
-if st.button("Interpréter le tirage") and st.session_state.cards:
-    with st.spinner("Obtention de la lecture AI..."):
+if st.button("Révéler le message des cartes"):
+    with st.spinner("Les cartes s'alignent dans le silence..."):
         messages_interp = [
-            {"role": "system", "content": "Vous êtes un interprète de tarot bienveillant et clair."},
-            {"role": "user", "content": prompt_interpretation(question, spread_name, SPREADS[spread_name], st.session_state.cards)}
+            {"role": "system", "content": "Tu es l'oracle qui dévoile le message du tirage avec bienveillance et clarté."},
+            {"role": "user", "content": prompt_interpretation(question, spread_name, positions, st.session_state.cards)}
         ]
-        try:
-            st.session_state.reading = llm.query_llm(messages_interp)
-        except Exception as e:
-            st.error(f"Erreur lors de l'appel au LLM: {e}")
+        st.session_state.reading = llm.query_llm(messages_interp)
 
-if st.session_state.reading:
-    st.subheader("Lecture AI")
-    if hasattr(st.session_state.reading, 'cards_interpretation'):
-        for ci in st.session_state.reading.cards_interpretation:
-            st.markdown(f"**{ci.position} ({ci.card})**: {ci.interpretation}")
-    if hasattr(st.session_state.reading, 'synthesis'):
-        st.markdown(f"**Synthèse**: {st.session_state.reading.synthesis}")
+if "reading" in st.session_state and st.session_state.reading:
+    st.markdown("### 🔮 Lecture des Arcanes 🔮")
+    for ci in st.session_state.reading.cards_interpretation:
+        st.markdown(f"**{ci.position} ({ci.card})** — {ci.interpretation}")
+    st.markdown(f"**Synthèse** — {st.session_state.reading.synthesis}")
